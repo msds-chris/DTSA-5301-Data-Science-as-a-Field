@@ -1,0 +1,230 @@
+---
+title: "NYPD Shootings"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+This analysis takes a look at the number of shootings recorded by the NYPD for the years 2006 through 2020.
+
+### Load the libraries used
+
+```{r,message=FALSE, libraries}
+library(tidyverse)
+library(lubridate)
+```
+
+### About the data
+
+The data set contains information about shooting incidents recorded by the NYPD for 2006 through 2020. Only incidents which resulted in an injured victim are included. More information can be found at the following links:
+
+* Data set home page: https://data.cityofnewyork.us/Public-Safety/NYPD-Shooting-Incident-Data-Historic-/833y-fsy8
+* Data set footnotes: https://data.cityofnewyork.us/api/views/833y-fsy8/files/e4e3d86c-348f-4a16-a17f-19480c089429?download=true&filename=NYPD_Shootings_Incident_Level_Data_Footnotes.pdf
+
+### Load the data set
+
+```{r loading}
+url = "https://data.cityofnewyork.us/api/views/833y-fsy8/rows.csv?accessType=DOWNLOAD"
+
+nypd_shootings = read_csv(url, show_col_types = FALSE)
+```
+
+### Summary of the unmodified data set
+
+```{r summary_1}
+summary(nypd_shootings)
+```
+
+### Columns not needed for this analysis
+
+This analysis examines the total number of shootings over time and looks to see if the data varies by borough. Demographic and other factors are not considered, so the following variables can be removed:
+
+* INCIDENT_KEY
+* PRECINCT
+* JURISDICTION_CODE
+* LOCATION_DESC
+* STATISTICAL_MURDER_FLAG
+* PERP_AGE_GROUP
+* PERP_SEX
+* PERP_RACE
+* VIC_AGE_GROUP
+* VIC_SEX
+* VIC_RACE
+* X_COORD_CD
+* Y_COORD_CD
+* Latitude
+* Longitude
+* Lon_Lat
+
+### Character variables that should be factors:
+
+* BORO
+
+### Character variables that should be date objects:
+
+* OCCUR_DATE
+
+Tidy the data as described above:
+
+```{r tidy}
+nypd_shootings <- nypd_shootings %>%
+  select(-c(
+    INCIDENT_KEY,
+    OCCUR_TIME,
+    PRECINCT,
+    JURISDICTION_CODE,
+    LOCATION_DESC,
+    STATISTICAL_MURDER_FLAG,
+    PERP_AGE_GROUP,
+    PERP_SEX,
+    PERP_RACE,
+    VIC_AGE_GROUP,
+    VIC_SEX,
+    VIC_RACE,
+    X_COORD_CD, 
+    Y_COORD_CD,
+    Latitude, 
+    Longitude, 
+    Lon_Lat)) %>%
+  mutate(BORO = as.factor(BORO),
+         OCCUR_DATE = mdy(OCCUR_DATE))
+```
+
+
+### Summary of the tidied data set
+
+```{r summary_2}
+summary(nypd_shootings)
+```
+
+There is no missing data in the date or borough variables. No additional steps are needed to filter or augment the data.
+
+### Trend Overview
+
+```{r trend}
+nypd_shootings %>% 
+  group_by(month = floor_date(OCCUR_DATE, unit = "month")) %>% 
+  summarize(count=n()) %>% 
+  ggplot(mapping=aes(x = month, y=count)) + 
+  geom_line(color="red") +
+  xlab("Date 2006-2020") +
+  ylab("Number of shootings per month") +
+  ggtitle("NYPD Shootings Trend Over Time") +
+  theme_classic()
+```
+
+### Trend Analysis
+
+This chart illustrates a general downward trend of NYPD shootings through 2019, with notable reductions from historical levels in 2017, 2018, and 2019 in particular. The unique circumstances of the pandemic correlate with a marked increase in shootings in 2020, rising to levels significantly higher than any single month in the prior 14 years.
+
+Also suggested by this chart is a seasonal cycle to shootings, which is illustrated below.
+
+To further examine the downward trend, we'll construct a linear model that maps each year to the number of shootings. Since 2020 was an outlier under extenuating circumstances, we'll omit it from the model.
+
+### Construct the data for number of shootings by year, excluding 2020
+
+```{r yearly}
+nypd_yearly_shootings <- 
+  nypd_shootings %>%
+  group_by(year = year(OCCUR_DATE)) %>%
+  summarize(count = n()) %>%
+  filter(year < 2020)
+
+nypd_yearly_shootings
+```
+
+### Build a linear model comparing the year to the number of shootings
+
+```{r model}
+yearly_model = lm(count ~ year, data = nypd_yearly_shootings)
+
+summary(yearly_model)
+```
+
+### Combine the model predictions with the yearly data and visualize
+
+```{r model_plot}
+yearly_shootings_predictions <- nypd_yearly_shootings %>%
+  mutate(pred = predict(yearly_model))
+
+yearly_shootings_predictions %>% 
+  ggplot(mapping=aes(x = as.factor(year))) + 
+  geom_line(mapping = aes(y = pred, group=1), color="red", size=2) +
+  geom_line(mapping = aes(y = count, group=1), color="blue", size=2) +
+  geom_point(mapping = aes(y = count), color="blue", size=4) +
+  xlab("Year") +
+  ylab("Number of shootings") +
+  ggtitle("NYPD Shootings Trend") +
+  theme_classic()
+```
+
+### Model analysis
+
+The predictions of the linear model are shown in red, while the actual data points are shown in blue. Overall, the historical data is reasonably close to the model. 2012 stands out as a large outlier and the only case of an increase in shootings for two consecutive years.
+
+
+### Seasonal Cycle
+
+```{r seasonal}
+nypd_shootings %>% 
+  group_by(month = as.factor(month(OCCUR_DATE)), year = year(OCCUR_DATE)) %>% 
+  summarize(count=n()) %>% 
+  summarize(count=mean(count)) %>%
+  ggplot(mapping=aes(x = month, y=count, group=1)) + 
+  geom_rect(xmin=11.5, xmax=12.5, ymin=0, ymax=200, fill="#aed2e2", alpha=0.1) +
+  geom_rect(xmin=0, xmax=2.5, ymin=0, ymax=200, fill="#aed2e2", alpha=0.1) +
+  geom_rect(xmin=2.5, xmax=5.5, ymin=0, ymax=200, fill="#a9dcd2", alpha=0.1) +
+  geom_rect(xmin=5.5, xmax=8.5, ymin=0, ymax=200, fill="#f6fcb4", alpha=0.1) +
+  geom_rect(xmin=8.5, xmax=11.5, ymin=0, ymax=200, fill="#f4cda3", alpha=0.1) +
+  stat_summary(fun=identity, geom="line", size=3) +
+  geom_point(color="red", size=7) +
+  xlab("Month") +
+  ylab("Number of shootings") +
+  ggtitle("Average Shootings By Month 2006-2020") +
+  theme_classic()
+```
+
+### Seasonality Analysis
+
+The number of shootings each year in New York follow a very clear seasonal cycle: highest in the summer and lowest in the winter. The weather likely has a strong effect on how much people are out of their homes and in circumstances where shootings might occur. There is small uptick in December, which might correlate with factors related to the holiday season.
+
+### Breakdown by Borough
+
+```{r borough}
+nypd_shootings %>% 
+  group_by(BORO, period = floor_date(OCCUR_DATE, unit = "year")) %>% 
+  summarize(count=n()) %>% 
+  ggplot(mapping=aes(x = period, y=count, color=BORO)) + 
+  geom_line() +
+  xlab("Date") +
+  ylab("Number of shootings") +
+  ggtitle("NYPD Shootings by Borough") +
+  theme_classic() 
+```
+
+### Analysis
+
+A reasonable question is whether there is a difference in the number of shootings between the boroughs of New York City. However, this chart shows actual numbers of shootings, which is not normalized by the size of the population. This chart does not necessarily indicate that Staten Island is safer or that the likelihood of a shooting is lower there. However, the population of Staten Island is less than 1/5th that of Brooklyn (https://en.wikipedia.org/wiki/Boroughs_of_New_York_City) while the number of shootings in Brooklyn is more than 5 times higher, so further analysis would be interesting.
+
+### Conclusion and possible sources of bias
+
+The data show the unfortunate reality that a 14-year downward trend in shootings was entirely reversed, and more so, in 2020. Because the data does not go further, and the pandemic and its effects are still having a large impact, it is not possible to predict whether the decline in shootings will resume.
+
+The seasonal cycle of shootings may suggest an opportunity to focus public safety measures and educational initiatives during the part of the year when they're likely to have the most impact.
+
+A number of possible biases might be present in the underlying data and in this analysis. The footnotes provided by the NYPD state that the collection of data was subject to change over time due to evolving processes and technologies. An increase in data collection and reporting technology in the later years could be the cause of a difference in the consistency and completeness of the data compared to earlier years. That's not accounted for in this analysis.
+
+There could be biases related to unreported shootings, or shootings in which a victim was not properly identified. Since no attempt was made to pin down or correct for things like that, this analysis could also be biased to an unknown degree.
+
+Finally, this report looked at totals only, and disregarded all demographic data. Therefore, any biases due to demographics could remain and have an impact on the final report.
+
+
+This document was created with
+
+```{r info}
+sessionInfo()
+```
